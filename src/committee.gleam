@@ -16,8 +16,6 @@ import pprint
 
 // TODO: support authors instead of author, comma separated list
 
-const max_commit_count = 2000
-
 const one_minute = 60_000
 
 pub fn main() -> Nil {
@@ -25,6 +23,10 @@ pub fn main() -> Nil {
     ["ranked-authors", "--path=" <> path] ->
       path
       |> ranked_authors
+      |> print_results
+    ["current-repo-files", "--path=" <> path] ->
+      path
+      |> current_repo_files
       |> print_results
     ["commits", "--path=" <> path, "--author=" <> maybe_quoted_git_author] ->
       maybe_quoted_git_author
@@ -82,6 +84,8 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress ranked-authors --path=\"/PATH/TO/REPO\"
 
+  gleam run --no-print-progress current-repo-files --path=\"/PATH/TO/REPO\"
+
   gleam run --no-print-progress commits --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
 
   gleam run --no-print-progress commit-files --path=\"/PATH/TO/REPO\" --commit=d623c514686f241f0b424b48917f094efa5c854b
@@ -90,11 +94,11 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
+  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
 
-  gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
+  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
 
-  gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
+  TODO: gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
 "
       |> io.println_error
 
@@ -160,6 +164,16 @@ fn then_println(x: a, message message: String) -> a {
   message |> io.println
 
   x
+}
+
+fn current_repo_files(path path: String) -> List(String) {
+  let command = "git"
+  let args = ["ls-files"]
+
+  case shell.exec_command(path:, command:, args:, print_command: True) {
+    Ok(strings) -> strings |> string.split("\n")
+    Error(error) -> panic as pprint.format(error)
+  }
 }
 
 fn ranked_authors(path path: String) -> List(String) {
@@ -270,20 +284,44 @@ fn author_lines(lines lines: List(String), author author: String) -> Int {
   })
 }
 
+const max_git_processes = 64
+
 fn repo_file_blame_quota(
   author author: String,
   path path: String,
 ) -> List(#(String, Int, Int, Float)) {
-  author
-  |> commits(path:)
-  |> collect_files_from_commits(path:)
-  |> then_println("Getting blame quota for files...")
+  // author
+  // |> commits(path:)
+  // |> then_println("Getting files from commits...")
+  // |> collect_files_from_commits(path:)
+  path
+  |> then_println("Getting current repo files...")
+  |> current_repo_files
+  |> list.sized_chunk(into: max_git_processes)
+  |> list.flat_map(fn(files: List(String)) -> List(#(String, Int, Int, Float)) {
+    {
+      "Getting git blame based quota for up to "
+      <> files |> list.length |> int.to_string
+      <> " files..."
+    }
+    |> io.println
+
+    files |> repo_file_blame_quota_chunk(path:, author:)
+  })
+}
+
+fn repo_file_blame_quota_chunk(
+  files files: List(String),
+  path path: String,
+  author author: String,
+) -> List(#(String, Int, Int, Float)) {
+  files
   |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Float)) {
     task.async(fn() -> #(String, Int, Int, Float) {
       file |> file_blame_quota(path:, author:, print_command: False)
     })
   })
-  |> task.try_await_all(one_minute)
+  |> task.try_await_all(one_minute * 5)
   |> list.fold(
     [],
     fn(
@@ -291,83 +329,85 @@ fn repo_file_blame_quota(
       task_result: Result(#(String, Int, Int, Float), task.AwaitError),
     ) -> List(#(String, Int, Int, Float)) {
       case task_result {
-        Ok(quota) -> [quota, ..acc]
+        Ok(quota) if quota.2 > 0 -> [quota, ..acc]
+        Ok(_quota) -> acc
         Error(error) -> panic as pprint.format(error)
       }
     },
   )
 }
+//
+// const max_commit_count = 2000
+//
+// const files_from_commits_chunk_size = 64
+// fn collect_files_from_commits(
+//   commits commits: List(String),
+//   path path: String,
+// ) -> List(String) {
+//   let commits = commits |> list.take(max_commit_count)
 
-const files_from_commits_chunk_size = 64
+//   {
+//     "Collecting from "
+//     <> commits |> list.length |> int.to_string
+//     <> " commits..."
+//   }
+//   |> io.println
 
-fn collect_files_from_commits(
-  commits commits: List(String),
-  path path: String,
-) -> List(String) {
-  let commits = commits |> list.take(max_commit_count)
+//   commits
+//   |> list.sized_chunk(into: files_from_commits_chunk_size)
+//   |> list.map(fn(commits_chunk: List(String)) -> List(String) {
+//     {
+//       "Getting files from up to "
+//       <> commits_chunk |> list.length |> int.to_string
+//       <> " commits..."
+//     }
+//     |> io.println
 
-  {
-    "Collecting from "
-    <> commits |> list.length |> int.to_string
-    <> " commits..."
-  }
-  |> io.println
+//     commits_chunk |> collect_files_from_commits_chunk(path:)
+//   })
+//   |> list.flatten
+//   |> fn(file_pathes: List(String)) -> List(String) {
+//     {
+//       "Detected "
+//       <> file_pathes |> list.length |> int.to_string
+//       <> " files in commits..."
+//     }
+//     |> io.println
 
-  commits
-  |> list.sized_chunk(into: files_from_commits_chunk_size)
-  |> list.map(fn(commits_chunk: List(String)) -> List(String) {
-    {
-      "Getting files from up to "
-      <> commits_chunk |> list.length |> int.to_string
-      <> " commits..."
-    }
-    |> io.println
+//     file_pathes
+//   }
+//   |> then_println("Removing duplicate files...")
+//   |> list.unique
+//   |> fn(files: List(String)) -> List(String) {
+//     {
+//       "Detected " <> files |> list.length |> int.to_string <> " unique files..."
+//     }
+//     |> io.println
 
-    commits_chunk |> collect_files_from_commits_chunk(path:)
-  })
-  |> list.flatten
-  |> fn(file_pathes: List(String)) -> List(String) {
-    {
-      "Detected "
-      <> file_pathes |> list.length |> int.to_string
-      <> " files in commits..."
-    }
-    |> io.println
+//     files
+//   }
+// }
 
-    file_pathes
-  }
-  |> then_println("Removing duplicate files...")
-  |> list.unique
-  |> fn(files: List(String)) -> List(String) {
-    {
-      "Detected " <> files |> list.length |> int.to_string <> " unique files..."
-    }
-    |> io.println
-
-    files
-  }
-}
-
-fn collect_files_from_commits_chunk(
-  commits commits: List(String),
-  path path: String,
-) -> List(String) {
-  commits
-  |> list.map(fn(commit: String) -> task.Task(List(String)) {
-    task.async(fn() -> List(String) {
-      commit |> commit_files(path:, print_command: False)
-    })
-  })
-  |> task.try_await_all(one_minute)
-  |> list.fold(
-    [],
-    fn(acc: List(String), task_result: Result(List(String), task.AwaitError)) -> List(
-      String,
-    ) {
-      case task_result {
-        Ok(files) -> list.flatten([acc, files])
-        Error(error) -> panic as pprint.format(error)
-      }
-    },
-  )
-}
+// fn collect_files_from_commits_chunk(
+//   commits commits: List(String),
+//   path path: String,
+// ) -> List(String) {
+//   commits
+//   |> list.map(fn(commit: String) -> task.Task(List(String)) {
+//     task.async(fn() -> List(String) {
+//       commit |> commit_files(path:, print_command: False)
+//     })
+//   })
+//   |> task.try_await_all(one_minute)
+//   |> list.fold(
+//     [],
+//     fn(acc: List(String), task_result: Result(List(String), task.AwaitError)) -> List(
+//       String,
+//     ) {
+//       case task_result {
+//         Ok(files) -> list.flatten([acc, files])
+//         Error(error) -> panic as pprint.format(error)
+//       }
+//     },
+//   )
+// }
