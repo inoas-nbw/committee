@@ -16,6 +16,8 @@ import pprint
 
 // TODO: support authors instead of author, comma separated list
 
+const max_files_to_consider = 20
+
 const one_minute = 60_000
 
 pub fn main() -> Nil {
@@ -26,7 +28,7 @@ pub fn main() -> Nil {
       |> print_results
     ["current-repo-files", "--path=" <> path] ->
       path
-      |> current_repo_files
+      |> current_repo_files(print_command: True)
       |> print_results
     ["commits", "--path=" <> path, "--author=" <> maybe_quoted_git_author] ->
       maybe_quoted_git_author
@@ -57,7 +59,11 @@ pub fn main() -> Nil {
       "--author=" <> maybe_quoted_git_author,
       "--sort-by-quota",
     ] -> {
-      repo_file_blame_quota(path:, author: maybe_quoted_git_author)
+      repo_file_blame_quota(
+        path:,
+        author: maybe_quoted_git_author,
+        print_command: True,
+      )
       |> then_println("Sorting by quota percentage...")
       |> list.sort(quota_compare_percentage_desc)
       |> then_println("Percentage quotas:\n")
@@ -71,7 +77,11 @@ pub fn main() -> Nil {
       "--author=" <> maybe_quoted_git_author,
       "--sort-by-total",
     ] -> {
-      repo_file_blame_quota(path:, author: maybe_quoted_git_author)
+      repo_file_blame_quota(
+        path:,
+        author: maybe_quoted_git_author,
+        print_command: True,
+      )
       |> then_println("Sorting by quota total...")
       |> list.sort(quota_compare_total_desc)
       |> then_println("Total quotas:\n")
@@ -79,8 +89,29 @@ pub fn main() -> Nil {
 
       Nil
     }
+    [
+      "export-repo-file-blame-quota-to-csv",
+      "--path=" <> path,
+      "--author=" <> maybe_quoted_git_author,
+    ] -> {
+      io.println("FILE PATH, AUTHOR LINES, TOTAL LINES, LINES PERCENTAGE")
+
+      repo_file_blame_quota(
+        path:,
+        author: maybe_quoted_git_author,
+        print_command: False,
+      )
+      |> list.sort(quota_compare_total_desc)
+      |> list.map(print_csv)
+
+      Nil
+    }
     _ -> {
       "Usages:
+
+  gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" > git-blame-quota-export.csv
+
+  OR:
 
   gleam run --no-print-progress ranked-authors --path=\"/PATH/TO/REPO\"
 
@@ -98,7 +129,6 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
 
-  TODO: gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
 "
       |> io.println_error
 
@@ -122,6 +152,26 @@ fn print_quota(quota: #(String, Int, Int, Float)) -> Nil {
     <> " - "
     <> percentage
     <> "%"
+  }
+  |> io.println
+}
+
+fn print_csv(quota: #(String, Int, Int, Float)) -> Nil {
+  let author_lines = quota.1 |> int.to_string
+  let total_lines = quota.2 |> int.to_string
+  let percentage = quota.3 |> float.to_string
+
+  {
+    "\""
+    <> quota.0
+    <> "\""
+    <> ", "
+    <> author_lines
+    <> ", "
+    <> total_lines
+    <> ", "
+    <> percentage
+    <> ";"
   }
   |> io.println
 }
@@ -166,11 +216,25 @@ fn then_println(x: a, message message: String) -> a {
   x
 }
 
-fn current_repo_files(path path: String) -> List(String) {
+fn then_println_if(x: a, message message: String, when when: Bool) -> a {
+  case when {
+    True -> message |> io.println
+    False -> Nil
+  }
+
+  x
+}
+
+fn current_repo_files(
+  path path: String,
+  print_command print_command: Bool,
+) -> List(String) {
   let command = "git"
   let args = ["ls-files"]
 
-  case shell.exec_command(path:, command:, args:, print_command: True) {
+  case
+    shell.exec_command(path:, command:, args:, print_command: print_command)
+  {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
   }
@@ -284,29 +348,36 @@ fn author_lines(lines lines: List(String), author author: String) -> Int {
   })
 }
 
-const max_git_processes = 64
+const max_git_processes = 128
 
 fn repo_file_blame_quota(
   author author: String,
   path path: String,
+  print_command print_command: Bool,
 ) -> List(#(String, Int, Int, Float)) {
   // author
   // |> commits(path:)
   // |> then_println("Getting files from commits...")
   // |> collect_files_from_commits(path:)
   path
-  |> then_println("Getting current repo files...")
-  |> current_repo_files
+  |> then_println_if("Getting current repo files...", when: print_command)
+  |> current_repo_files(print_command:)
+  |> list.take(max_files_to_consider)
   |> list.sized_chunk(into: max_git_processes)
   |> list.flat_map(fn(files: List(String)) -> List(#(String, Int, Int, Float)) {
-    {
-      "Getting git blame based quota for up to "
-      <> files |> list.length |> int.to_string
-      <> " files..."
+    case print_command {
+      True ->
+        {
+          "Getting git blame based quota for up to "
+          <> files |> list.length |> int.to_string
+          <> " files..."
+        }
+        |> io.println
+      False -> Nil
     }
-    |> io.println
 
-    files |> repo_file_blame_quota_chunk(path:, author:)
+    files
+    |> repo_file_blame_quota_chunk(path:, author:, print_command: print_command)
   })
 }
 
@@ -314,11 +385,12 @@ fn repo_file_blame_quota_chunk(
   files files: List(String),
   path path: String,
   author author: String,
+  print_command print_command: Bool,
 ) -> List(#(String, Int, Int, Float)) {
   files
   |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Float)) {
     task.async(fn() -> #(String, Int, Int, Float) {
-      file |> file_blame_quota(path:, author:, print_command: False)
+      file |> file_blame_quota(path:, author:, print_command: print_command)
     })
   })
   |> task.try_await_all(one_minute * 5)
@@ -329,7 +401,7 @@ fn repo_file_blame_quota_chunk(
       task_result: Result(#(String, Int, Int, Float), task.AwaitError),
     ) -> List(#(String, Int, Int, Float)) {
       case task_result {
-        Ok(quota) if quota.2 > 0 -> [quota, ..acc]
+        Ok(quota) if quota.1 > 0 -> [quota, ..acc]
         Ok(_quota) -> acc
         Error(error) -> panic as pprint.format(error)
       }
