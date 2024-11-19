@@ -16,7 +16,7 @@ import pprint
 
 // TODO: support authors instead of author, comma separated list
 
-const max_files_to_consider = 20
+const max_files_to_consider = 1_000_000
 
 const one_minute = 60_000
 
