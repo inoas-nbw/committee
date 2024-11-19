@@ -1,15 +1,24 @@
 import argv
 import committee/shell
+import gleam/float
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{Some}
+import gleam/order.{type Order}
 import gleam/otp/task
 import gleam/regex
 import gleam/string
-import pprint.{debug as dbg}
+
+import pprint
+
+// import pprint.{debug as dbg}
 
 // TODO: support authors instead of author, comma separated list
+
+const max_commit_count = 2000
+
+const one_minute = 60_000
 
 pub fn main() -> Nil {
   case argv.load().arguments {
@@ -23,11 +32,12 @@ pub fn main() -> Nil {
       |> print_results
     ["commit-files", "--path=" <> path, "--commit=" <> commit] ->
       commit
-      |> commit_files(path:)
+      |> commit_files(path:, print_command: True)
+      |> list.sort(by: string.compare)
       |> print_results
     ["file-blame", "--path=" <> path, "--file-path=" <> file_path] ->
       file_path
-      |> file_blame(path:)
+      |> file_blame(path:, print_command: False)
       |> print_results
     [
       "file-blame-quota",
@@ -36,33 +46,34 @@ pub fn main() -> Nil {
       "--author=" <> author,
     ] -> {
       file_path
-      |> file_blame_quota(path:, author:)
-      |> fn(quota) {
-        {
-          quota.0 <> " " <> quota.1 |> int.to_string <> quota.2 |> int.to_string
-        }
-        //
-        // If I omit calling io.println, I get:
-        //
-        // src/committee.gleam:51:18: Warning: a term is constructed, but never used
-        // %   51|       "--path=" <> path,
-        // %     |                  ^
-
-        // |> io.println
-      }
+      |> file_blame_quota(path:, author:, print_command: True)
+      |> print_quota
+    }
+    [
+      "repo-file-blame-quota",
+      "--path=" <> path,
+      "--author=" <> maybe_quoted_git_author,
+      "--sort-by-quota",
+    ] -> {
+      repo_file_blame_quota(path:, author: maybe_quoted_git_author)
+      |> then_println("Sorting by quota percentage...")
+      |> list.sort(quota_compare_percentage_desc)
+      |> then_println("Percentage quotas:\n")
+      |> list.map(print_quota)
 
       Nil
     }
     [
-      "top-blame-quota",
+      "repo-file-blame-quota",
       "--path=" <> path,
       "--author=" <> maybe_quoted_git_author,
+      "--sort-by-total",
     ] -> {
-      top_blame_quota(path:, author: maybe_quoted_git_author)
-      |> then_println(" ")
-      |> dbg
-      // |> string.join("\n")
-      // |> io.println
+      repo_file_blame_quota(path:, author: maybe_quoted_git_author)
+      |> then_println("Sorting by quota total...")
+      |> list.sort(quota_compare_total_desc)
+      |> then_println("Total quotas:\n")
+      |> list.map(print_quota)
 
       Nil
     }
@@ -79,14 +90,63 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress top-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
+  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress export-top-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
+  gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
+
+  gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
 "
       |> io.println_error
 
       Nil
     }
+  }
+}
+
+fn print_quota(quota: #(String, Int, Int, Float)) -> Nil {
+  let author_lines = quota.1 |> int.to_string
+  let total_lines = quota.2 |> int.to_string
+  let percentage = quota.3 |> float.to_string
+
+  {
+    quota.0
+    <> " - "
+    <> author_lines
+    <> " of "
+    <> total_lines
+    <> " lines"
+    <> " - "
+    <> percentage
+    <> "%"
+  }
+  |> io.println
+}
+
+fn quota_compare_percentage_desc(
+  a: #(String, Int, Int, Float),
+  with b: #(String, Int, Int, Float),
+) -> Order {
+  case a.3 == b.3 {
+    True -> order.Eq
+    False ->
+      case a.3 >. b.3 {
+        True -> order.Lt
+        False -> order.Gt
+      }
+  }
+}
+
+fn quota_compare_total_desc(
+  a: #(String, Int, Int, Float),
+  with b: #(String, Int, Int, Float),
+) -> Order {
+  case a.1 == b.1 {
+    True -> order.Eq
+    False ->
+      case a.1 > b.1 {
+        True -> order.Lt
+        False -> order.Gt
+      }
   }
 }
 
@@ -97,7 +157,8 @@ fn print_results(strings strngs: List(String)) -> Nil {
 }
 
 fn then_println(x: a, message message: String) -> a {
-  io.println(message)
+  message |> io.println
+
   x
 }
 
@@ -105,7 +166,7 @@ fn ranked_authors(path path: String) -> List(String) {
   let command = "git"
   let args = ["shortlog", "-n", "-s"]
 
-  case shell.exec_command(path: path, command:, args:) {
+  case shell.exec_command(path:, command:, args:, print_command: True) {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
   }
@@ -115,17 +176,21 @@ fn commits(author author: String, path path: String) -> List(String) {
   let command = "git"
   let args = ["log", "--author=" <> author, "--format=format:%H"]
 
-  case shell.exec_command(path: path, command:, args:) {
+  case shell.exec_command(path:, command:, args:, print_command: True) {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
   }
 }
 
-fn commit_files(commit commit: String, path path: String) -> List(String) {
+fn commit_files(
+  commit commit: String,
+  path path: String,
+  print_command print_command: Bool,
+) -> List(String) {
   let command = "git"
   let args = ["-c", "diff.renamelimit=9999", "diff", "--name-only", commit]
 
-  case shell.exec_command(path: path, command:, args:) {
+  case shell.exec_command(path:, command:, args:, print_command:) {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
   }
@@ -134,11 +199,12 @@ fn commit_files(commit commit: String, path path: String) -> List(String) {
 fn file_blame(
   relative_file_path relative_file_path: String,
   path path: String,
+  print_command print_command: Bool,
 ) -> List(String) {
   let command = "git"
-  let args = ["blame", "-w", "-M", "-C", "-C", relative_file_path]
+  let args = ["blame", "-w", "-c", "-M", "-C", "-C", relative_file_path]
 
-  case shell.exec_command(path: path, command:, args:) {
+  case shell.exec_command(path:, command:, args:, print_command:) {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
   }
@@ -148,13 +214,19 @@ fn file_blame_quota(
   relative_file_path relative_file_path: String,
   path path: String,
   author author: String,
-) -> #(String, Int, Int) {
+  print_command print_command: Bool,
+) -> #(String, Int, Int, Float) {
   let file_blame =
-    relative_file_path |> file_blame(path:) |> reject_empty_lines_in_file_blame
+    relative_file_path
+    |> file_blame(path:, print_command:)
+    |> reject_empty_lines_in_file_blame
   let total_lines = file_blame |> total_lines
-  let author_lines = file_blame |> author_lines(author: author)
+  let author_lines = file_blame |> author_lines(author:)
+  let percentage =
+    { int.to_float(author_lines) /. int.to_float(total_lines) *. 100.0 }
+    |> float.to_precision(3)
 
-  #(relative_file_path, author_lines, total_lines)
+  #(relative_file_path, author_lines, total_lines, percentage)
 }
 
 fn reject_empty_lines_in_file_blame(lines lines: List(String)) -> List(String) {
@@ -166,7 +238,7 @@ fn reject_empty_lines_in_file_blame(lines lines: List(String)) -> List(String) {
     )
 
   lines
-  |> list.filter(fn(line) {
+  |> list.filter(fn(line: String) -> Bool {
     line |> regex.check(with: match_empty_source_code_line_re) == False
   })
 }
@@ -184,7 +256,7 @@ fn author_lines(lines lines: List(String), author author: String) -> Int {
     )
 
   lines
-  |> list.fold(0, fn(acc, line) {
+  |> list.fold(0, fn(acc: Int, line: String) -> Int {
     let matches = line |> regex.scan(with: fetch_line_author_re)
     case matches {
       [regex.Match(_full_match, [Some(_commit_id), Some(match_author)])] ->
@@ -198,35 +270,55 @@ fn author_lines(lines lines: List(String), author author: String) -> Int {
   })
 }
 
-fn top_blame_quota(author author: String, path path: String) -> List(String) {
+fn repo_file_blame_quota(
+  author author: String,
+  path path: String,
+) -> List(#(String, Int, Int, Float)) {
   author
   |> commits(path:)
   |> collect_files_from_commits(path:)
+  |> then_println("Getting blame quota for files...")
+  |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Float)) {
+    task.async(fn() -> #(String, Int, Int, Float) {
+      file |> file_blame_quota(path:, author:, print_command: False)
+    })
+  })
+  |> task.try_await_all(one_minute)
+  |> list.fold(
+    [],
+    fn(
+      acc: List(#(String, Int, Int, Float)),
+      task_result: Result(#(String, Int, Int, Float), task.AwaitError),
+    ) -> List(#(String, Int, Int, Float)) {
+      case task_result {
+        Ok(quota) -> [quota, ..acc]
+        Error(error) -> panic as pprint.format(error)
+      }
+    },
+  )
 }
 
-const tuncate_commits_to = 150
-
-const files_from_commits_chunk_size = 32
+const files_from_commits_chunk_size = 64
 
 fn collect_files_from_commits(
   commits commits: List(String),
   path path: String,
 ) -> List(String) {
-  let commits = commits |> list.take(tuncate_commits_to)
+  let commits = commits |> list.take(max_commit_count)
 
   {
-    "Detected "
+    "Collecting from "
     <> commits |> list.length |> int.to_string
-    <> " files commits..."
+    <> " commits..."
   }
   |> io.println
 
   commits
   |> list.sized_chunk(into: files_from_commits_chunk_size)
-  |> list.map(fn(commits_chunk) {
+  |> list.map(fn(commits_chunk: List(String)) -> List(String) {
     {
-      "Getting files from "
-      <> files_from_commits_chunk_size |> int.to_string
+      "Getting files from up to "
+      <> commits_chunk |> list.length |> int.to_string
       <> " commits..."
     }
     |> io.println
@@ -234,10 +326,26 @@ fn collect_files_from_commits(
     commits_chunk |> collect_files_from_commits_chunk(path:)
   })
   |> list.flatten
+  |> fn(file_pathes: List(String)) -> List(String) {
+    {
+      "Detected "
+      <> file_pathes |> list.length |> int.to_string
+      <> " files in commits..."
+    }
+    |> io.println
+
+    file_pathes
+  }
   |> then_println("Removing duplicate files...")
   |> list.unique
-  |> then_println("Sorting files...")
-  |> list.sort(by: string.compare)
+  |> fn(files: List(String)) -> List(String) {
+    {
+      "Detected " <> files |> list.length |> int.to_string <> " unique files..."
+    }
+    |> io.println
+
+    files
+  }
 }
 
 fn collect_files_from_commits_chunk(
@@ -245,8 +353,12 @@ fn collect_files_from_commits_chunk(
   path path: String,
 ) -> List(String) {
   commits
-  |> list.map(fn(commit) { task.async(fn() { commit |> commit_files(path:) }) })
-  |> task.try_await_all(10_000)
+  |> list.map(fn(commit: String) -> task.Task(List(String)) {
+    task.async(fn() -> List(String) {
+      commit |> commit_files(path:, print_command: False)
+    })
+  })
+  |> task.try_await_all(one_minute)
   |> list.fold(
     [],
     fn(acc: List(String), task_result: Result(List(String), task.AwaitError)) -> List(
