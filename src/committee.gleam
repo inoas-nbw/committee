@@ -127,10 +127,10 @@ pub fn main() -> Nil {
   }
 }
 
-fn print_quota(quota: #(String, Int, Int, Float)) -> Nil {
+fn print_quota(quota: #(String, Int, Int, Int)) -> Nil {
   let author_lines = quota.1 |> int.to_string
   let total_lines = quota.2 |> int.to_string
-  let percentage = quota.3 |> float.to_string
+  let percentage = quota.3 |> int.to_string
 
   {
     quota.0
@@ -146,10 +146,10 @@ fn print_quota(quota: #(String, Int, Int, Float)) -> Nil {
   |> io.println
 }
 
-fn print_csv(quota: #(String, Int, Int, Float)) -> Nil {
+fn print_csv(quota: #(String, Int, Int, Int)) -> Nil {
   let author_lines = quota.1 |> int.to_string
   let total_lines = quota.2 |> int.to_string
-  let percentage = quota.3 |> float.to_string
+  let percentage = quota.3 |> int.to_string
 
   {
     "\""
@@ -167,13 +167,13 @@ fn print_csv(quota: #(String, Int, Int, Float)) -> Nil {
 }
 
 fn quota_compare_percentage_desc(
-  a: #(String, Int, Int, Float),
-  with b: #(String, Int, Int, Float),
+  a: #(String, Int, Int, Int),
+  with b: #(String, Int, Int, Int),
 ) -> Order {
   case a.3 == b.3 {
     True -> order.Eq
     False ->
-      case a.3 >. b.3 {
+      case a.3 > b.3 {
         True -> order.Lt
         False -> order.Gt
       }
@@ -181,8 +181,8 @@ fn quota_compare_percentage_desc(
 }
 
 fn quota_compare_total_desc(
-  a: #(String, Int, Int, Float),
-  with b: #(String, Int, Int, Float),
+  a: #(String, Int, Int, Int),
+  with b: #(String, Int, Int, Int),
 ) -> Order {
   case a.1 == b.1 {
     True -> order.Eq
@@ -283,7 +283,7 @@ fn file_blame_quota(
   path path: String,
   author author: String,
   print_command print_command: Bool,
-) -> #(String, Int, Int, Float) {
+) -> #(String, Int, Int, Int) {
   let file_blame =
     relative_file_path
     |> file_blame(path:, print_command:)
@@ -292,7 +292,7 @@ fn file_blame_quota(
   let author_lines = file_blame |> author_lines(author:)
   let percentage =
     { int.to_float(author_lines) /. int.to_float(total_lines) *. 100.0 }
-    |> float.to_precision(3)
+    |> float.round
 
   #(relative_file_path, author_lines, total_lines, percentage)
 }
@@ -344,7 +344,7 @@ fn repo_file_blame_quota(
   author author: String,
   path path: String,
   print_command print_command: Bool,
-) -> List(#(String, Int, Int, Float)) {
+) -> List(#(String, Int, Int, Int)) {
   // author
   // |> commits(path:)
   // |> then_println("Getting files from commits...")
@@ -354,7 +354,7 @@ fn repo_file_blame_quota(
   |> current_repo_files(print_command:)
   |> list.take(max_files_to_consider)
   |> list.sized_chunk(into: max_git_processes)
-  |> list.flat_map(fn(files: List(String)) -> List(#(String, Int, Int, Float)) {
+  |> list.flat_map(fn(files: List(String)) -> List(#(String, Int, Int, Int)) {
     case print_command {
       True ->
         {
@@ -376,10 +376,10 @@ fn repo_file_blame_quota_chunk(
   path path: String,
   author author: String,
   print_command print_command: Bool,
-) -> List(#(String, Int, Int, Float)) {
+) -> List(#(String, Int, Int, Int)) {
   files
-  |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Float)) {
-    task.async(fn() -> #(String, Int, Int, Float) {
+  |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Int)) {
+    task.async(fn() -> #(String, Int, Int, Int) {
       file |> file_blame_quota(path:, author:, print_command: print_command)
     })
   })
@@ -387,9 +387,9 @@ fn repo_file_blame_quota_chunk(
   |> list.fold(
     [],
     fn(
-      acc: List(#(String, Int, Int, Float)),
-      task_result: Result(#(String, Int, Int, Float), task.AwaitError),
-    ) -> List(#(String, Int, Int, Float)) {
+      acc: List(#(String, Int, Int, Int)),
+      task_result: Result(#(String, Int, Int, Int), task.AwaitError),
+    ) -> List(#(String, Int, Int, Int)) {
       case task_result {
         Ok(quota) if quota.1 > 0 -> [quota, ..acc]
         Ok(_quota) -> acc
