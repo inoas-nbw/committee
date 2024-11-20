@@ -109,7 +109,7 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" > git-blame-quota-export.csv
 
-  OR one of these::
+  OR one of these:
 
   gleam run ranked-authors --path=\"/PATH/TO/REPO\"
   gleam run current-repo-files --path=\"/PATH/TO/REPO\"
