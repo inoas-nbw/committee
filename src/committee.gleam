@@ -67,9 +67,7 @@ pub fn main() -> Nil {
       |> then_println("Sorting by quota percentage...")
       |> list.sort(quota_compare_percentage_desc)
       |> then_println("Percentage quotas:\n")
-      |> list.map(print_quota)
-
-      Nil
+      |> list.each(print_quota)
     }
     [
       "repo-file-blame-quota",
@@ -85,9 +83,7 @@ pub fn main() -> Nil {
       |> then_println("Sorting by quota total...")
       |> list.sort(quota_compare_total_desc)
       |> then_println("Total quotas:\n")
-      |> list.map(print_quota)
-
-      Nil
+      |> list.each(print_quota)
     }
     [
       "export-repo-file-blame-quota-to-csv",
@@ -102,9 +98,7 @@ pub fn main() -> Nil {
         print_command: False,
       )
       |> list.sort(quota_compare_total_desc)
-      |> list.map(print_csv)
-
-      Nil
+      |> list.each(print_csv)
     }
     _ -> {
       "Usages:
