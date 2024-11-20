@@ -109,22 +109,15 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress export-repo-file-blame-quota-to-csv --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" > git-blame-quota-export.csv
 
-  OR:
+  OR one of these::
 
   gleam run ranked-authors --path=\"/PATH/TO/REPO\"
-
   gleam run current-repo-files --path=\"/PATH/TO/REPO\"
-
   gleam run commits --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
-
-  gleam run commit-files --path=\"/PATH/TO/REPO\" --commit=d623c514686f241f0b424b48917f094efa5c854b
-
+  gleam run commit-files --path=\"/PATH/TO/REPO\" --commit=GIT_COMMIT_ID
   gleam run file-blame --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\"
-
   gleam run file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
-
   gleam run repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
-
   gleam run repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
 "
       |> io.println_error
