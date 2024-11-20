@@ -1,3 +1,8 @@
+//// Gatheres git blame information from a repo
+//// and calculates the percentage of lines of code
+//// a given author has contributed to each file.
+////
+
 import argv
 import committee/shell
 import gleam/float
@@ -9,7 +14,6 @@ import gleam/order.{type Order}
 import gleam/otp/task
 import gleam/regex
 import gleam/string
-
 import pprint
 
 // import pprint.{debug as dbg}
