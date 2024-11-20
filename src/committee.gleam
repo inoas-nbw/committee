@@ -111,21 +111,21 @@ pub fn main() -> Nil {
 
   OR:
 
-  gleam run --no-print-progress ranked-authors --path=\"/PATH/TO/REPO\"
+  gleam run ranked-authors --path=\"/PATH/TO/REPO\"
 
-  gleam run --no-print-progress current-repo-files --path=\"/PATH/TO/REPO\"
+  gleam run current-repo-files --path=\"/PATH/TO/REPO\"
 
-  gleam run --no-print-progress commits --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
+  gleam run commits --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress commit-files --path=\"/PATH/TO/REPO\" --commit=d623c514686f241f0b424b48917f094efa5c854b
+  gleam run commit-files --path=\"/PATH/TO/REPO\" --commit=d623c514686f241f0b424b48917f094efa5c854b
 
-  gleam run --no-print-progress file-blame --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\"
+  gleam run file-blame --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\"
 
-  gleam run --no-print-progress file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
+  gleam run file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
+  gleam run repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
 
-  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
+  gleam run repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
 "
       |> io.println_error
 
