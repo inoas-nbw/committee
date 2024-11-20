@@ -125,10 +125,9 @@ pub fn main() -> Nil {
 
   gleam run --no-print-progress file-blame-quota --path=\"/PATH/TO/REPO\" --file-path=\"RELATIVE/FILE/PATH/WITHIN/REPO\" --author=\"GIT_AUTHOR\"
 
-  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
-
   gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-total
 
+  gleam run --no-print-progress repo-file-blame-quota --path=\"/PATH/TO/REPO\" --author=\"GIT_AUTHOR\" --sort-by-quota
 "
       |> io.println_error
 
@@ -393,7 +392,7 @@ fn repo_file_blame_quota_chunk(
       file |> file_blame_quota(path:, author:, print_command: print_command)
     })
   })
-  |> task.try_await_all(one_minute * 5)
+  |> task.try_await_all(one_minute * 10)
   |> list.fold(
     [],
     fn(
