@@ -5,7 +5,6 @@
 
 import argv
 import committee/shell
-import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/io
@@ -16,6 +15,8 @@ import gleam/regexp
 import gleam/string
 import pprint
 import taskle
+
+// import gleam/erlang/process
 
 // import pprint.{debug as dbg}
 
@@ -279,7 +280,7 @@ fn file_blame(
   let command = "git"
   let args = ["blame", "-w", "-c", "-M", "-C", "-C", relative_file_path]
 
-  process.sleep(1000)
+  // process.sleep(1000)
 
   case shell.exec_command(path:, command:, args:, print_command:) {
     Ok(strings) -> strings |> string.split("\n")
