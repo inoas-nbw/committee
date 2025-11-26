@@ -1,24 +1,31 @@
-//// Gatheres git blame information from a repo
+//// Gatheres `git blame` information from a repo
 //// and calculates the percentage of lines of code
 //// a given author has contributed to each file.
 ////
 
 import argv
 import committee/shell
+import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{Some}
 import gleam/order.{type Order}
-import gleam/otp/task
-import gleam/regex
+import gleam/regexp
 import gleam/string
 import pprint
+import taskle
 
 // import pprint.{debug as dbg}
 
 // TODO: support authors instead of author, comma separated list
+
+// const max_commit_count = 2000
+//
+// const files_from_commits_chunk_size = 64
+
+const max_git_processes = 64
 
 const max_files_to_consider = 1_000_000
 
@@ -232,7 +239,7 @@ fn current_repo_files(
 
 fn ranked_authors(path path: String) -> List(String) {
   let command = "git"
-  let args = ["shortlog", "-n", "-s"]
+  let args = ["shortlog", "-n", "-s", "-e"]
 
   case shell.exec_command(path:, command:, args:, print_command: True) {
     Ok(strings) -> strings |> string.split("\n")
@@ -272,6 +279,8 @@ fn file_blame(
   let command = "git"
   let args = ["blame", "-w", "-c", "-M", "-C", "-C", relative_file_path]
 
+  process.sleep(1000)
+
   case shell.exec_command(path:, command:, args:, print_command:) {
     Ok(strings) -> strings |> string.split("\n")
     Error(error) -> panic as pprint.format(error)
@@ -300,14 +309,14 @@ fn file_blame_quota(
 fn reject_empty_lines_in_file_blame(lines lines: List(String)) -> List(String) {
   // Unescaped regex: ^[a-z0-9]*\s+\(.*\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}\s+\d{1,}\)\s*$
   let assert Ok(match_empty_source_code_line_re) =
-    regex.compile(
+    regexp.compile(
       "^[a-z0-9]*\\s+\\(.*\\s+\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} \\+\\d{4}\\s+\\d{1,}\\)\\s*$",
-      with: regex.Options(case_insensitive: False, multi_line: True),
+      with: regexp.Options(case_insensitive: False, multi_line: True),
     )
 
   lines
   |> list.filter(fn(line: String) -> Bool {
-    line |> regex.check(with: match_empty_source_code_line_re) == False
+    line |> regexp.check(with: match_empty_source_code_line_re) == False
   })
 }
 
@@ -317,17 +326,17 @@ fn total_lines(lines lines: List(String)) -> Int {
 
 fn author_lines(lines lines: List(String), author author: String) -> Int {
   let assert Ok(fetch_line_author_re) =
-    regex.compile(
+    regexp.compile(
       // Unescaped regex: ^([a-z0-9]*)\s+\((.*)\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \+\d{4}\s+\d{1,}\).*$
       "^([a-z0-9]*)\\s+\\((.*)\\s+\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} \\+\\d{4}\\s+\\d{1,}\\).*$",
-      with: regex.Options(case_insensitive: False, multi_line: True),
+      with: regexp.Options(case_insensitive: False, multi_line: True),
     )
 
   lines
   |> list.fold(0, fn(acc: Int, line: String) -> Int {
-    let matches = line |> regex.scan(with: fetch_line_author_re)
+    let matches = line |> regexp.scan(with: fetch_line_author_re)
     case matches {
-      [regex.Match(_full_match, [Some(_commit_id), Some(match_author)])] ->
+      [regexp.Match(_full_match, [Some(_commit_id), Some(match_author)])] ->
         case match_author == author {
           True -> acc + 1
           False -> acc
@@ -337,8 +346,6 @@ fn author_lines(lines lines: List(String), author author: String) -> Int {
     }
   })
 }
-
-const max_git_processes = 128
 
 fn repo_file_blame_quota(
   author author: String,
@@ -377,31 +384,30 @@ fn repo_file_blame_quota_chunk(
   author author: String,
   print_command print_command: Bool,
 ) -> List(#(String, Int, Int, Int)) {
-  files
-  |> list.map(fn(file: String) -> task.Task(#(String, Int, Int, Int)) {
-    task.async(fn() -> #(String, Int, Int, Int) {
-      file |> file_blame_quota(path:, author:, print_command: print_command)
+  let assert Ok(tasks) =
+    files
+    |> list.map(fn(file: String) {
+      taskle.async(fn() -> #(String, Int, Int, Int) {
+        file |> file_blame_quota(path:, author:, print_command: print_command)
+      })
     })
-  })
-  |> task.try_await_all(one_minute * 10)
+    |> taskle.try_await_all(one_minute * 60)
+
+  tasks
   |> list.fold(
     [],
     fn(
       acc: List(#(String, Int, Int, Int)),
-      task_result: Result(#(String, Int, Int, Int), task.AwaitError),
+      task_result: #(String, Int, Int, Int),
     ) -> List(#(String, Int, Int, Int)) {
       case task_result {
-        Ok(quota) if quota.1 > 0 -> [quota, ..acc]
-        Ok(_quota) -> acc
-        Error(error) -> panic as pprint.format(error)
+        quota if quota.1 > 0 -> [quota, ..acc]
+        _quota -> acc
       }
     },
   )
 }
 //
-// const max_commit_count = 2000
-//
-// const files_from_commits_chunk_size = 64
 // fn collect_files_from_commits(
 //   commits commits: List(String),
 //   path path: String,
@@ -455,15 +461,15 @@ fn repo_file_blame_quota_chunk(
 //   path path: String,
 // ) -> List(String) {
 //   commits
-//   |> list.map(fn(commit: String) -> task.Task(List(String)) {
-//     task.async(fn() -> List(String) {
+//   |> list.map(fn(commit: String) -> taskle.Task(List(String)) {
+//     taskle.async(fn() -> List(String) {
 //       commit |> commit_files(path:, print_command: False)
 //     })
 //   })
-//   |> task.try_await_all(one_minute)
+//   |> taskle.try_await_all(one_minute)
 //   |> list.fold(
 //     [],
-//     fn(acc: List(String), task_result: Result(List(String), task.AwaitError)) -> List(
+//     fn(acc: List(String), task_result: Result(List(String), taskle.AwaitError)) -> List(
 //       String,
 //     ) {
 //       case task_result {

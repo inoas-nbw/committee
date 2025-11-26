@@ -1,7 +1,7 @@
 import gleam/int
 import gleam/io
 import gleam/string
-import gleamyshell.{CommandOutput}
+import gleamyshell
 
 pub fn exec_command(
   path in: String,
@@ -24,8 +24,8 @@ pub fn exec_command(
   }
 
   case gleamyshell.execute(command, in:, args:) {
-    Ok(CommandOutput(0, output)) -> output |> string.trim |> Ok
-    Ok(CommandOutput(exit_code, output)) ->
+    Ok(gleamyshell.CommandOutput(0, output)) -> output |> string.trim |> Ok
+    Ok(gleamyshell.CommandOutput(exit_code, output)) ->
       non_zero_exit(command:, in:, args:, exit_code:, output:)
     Error(reason) -> error(command:, in:, args:, reason:)
   }
