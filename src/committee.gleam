@@ -26,7 +26,7 @@ import taskle
 //
 // const files_from_commits_chunk_size = 64
 
-const max_git_processes = 64
+const max_git_processes = 16
 
 const max_files_to_consider = 1_000_000
 
@@ -379,12 +379,23 @@ fn repo_file_blame_quota(
   })
 }
 
+const ignored_files_by_ext = [
+  ".xml",
+  ".json",
+]
+
 fn repo_file_blame_quota_chunk(
   files files: List(String),
   path path: String,
   author author: String,
   print_command print_command: Bool,
 ) -> List(#(String, Int, Int, Int)) {
+  let files =
+    files
+    |> list.filter(fn(file: String) {
+      list.any(ignored_files_by_ext, string.ends_with(file, _)) == False
+    })
+
   let assert Ok(tasks) =
     files
     |> list.map(fn(file: String) {
@@ -392,7 +403,7 @@ fn repo_file_blame_quota_chunk(
         file |> file_blame_quota(path:, author:, print_command: print_command)
       })
     })
-    |> taskle.try_await_all(one_minute * 60)
+    |> taskle.try_await_all(one_minute * 60 * 5)
 
   tasks
   |> list.fold(
