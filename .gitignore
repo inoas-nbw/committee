@@ -2,4 +2,5 @@
 *.ez
 /build
 erl_crash.dump
-local-notes.md
+
+/exports
